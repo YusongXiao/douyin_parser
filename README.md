@@ -5,9 +5,11 @@
 ## ✨ 功能特点
 
 - **全类型支持**: 视频 (`/video/`)、图文 (`/note/`)、动图 (`/note/` + GIF)
-- **最高画质**: 自动选择 4K/2K/1080p 最高清晰度
+- **最高画质**: 自动选择 4K/2K/1080p 最高清晰度视频 + 原图质量封面
+- **高清封面**: 智能选取作者上传的原始封面，优先使用 CDN 无压缩 `/obj/` 链接
 - **API 服务**: 内置 FastAPI 服务器，方便集成到其他系统
 - **反爬虫绕过**: 基于 Playwright 模拟真实浏览器，自动处理签名和验证
+- **短链智能识别**: 自动处理 `v.douyin.com` 短链，正确区分视频和图文内容
 
 ## ⚠️ 免责声明
 
@@ -118,14 +120,13 @@ API 返回统一的 JSON 结构，方便调用方处理。
   "data": {
     "title": "作品标题",
     "author": "作者昵称",
-    "cover": "封面图URL",
+    "cover": "封面图URL (作者上传的原始封面，原图质量)",
     "type": "video | images",  // 顶层类型提示
     "items": [
       // 统一 Items 数组，只需遍历此数组即可
       {
         "type": "video",
-        "video_url": "https://...",
-        "cover_url": "https://..."
+        "video_url": "https://..."
       },
       {
         "type": "image",
@@ -165,6 +166,7 @@ API 返回统一的 JSON 结构，方便调用方处理。
         "type": "note",
         "desc": "作品描述",
         "share_url": "https://www.douyin.com/note/7606955181091438309",
+        "cover": "https://... (作者上传的原始封面)",
         "create_time": 1771132277
       },
       {
@@ -172,6 +174,7 @@ API 返回统一的 JSON 结构，方便调用方处理。
         "type": "video",
         "desc": "作品描述",
         "share_url": "https://www.douyin.com/video/7599252551926900837",
+        "cover": "https://... (作者上传的原始封面)",
         "create_time": 1769338866
       }
     ]
