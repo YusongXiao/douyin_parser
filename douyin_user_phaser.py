@@ -262,11 +262,44 @@ def _parse_aweme_item(item):
         else f"https://www.douyin.com/video/{aweme_id}"
     )
 
+    # Extract cover URL — in the post list API, "cover" / "raw_cover" is the
+    # author-uploaded cover (shown on the user profile).  "origin_cover" is the
+    # auto-generated first frame.  We prefer /obj/ URLs for original quality.
+    cover_url = ""
+    video_info = item.get("video", {})
+    if video_info:
+        _fields = ("cover", "raw_cover", "dynamic_cover", "origin_cover")
+        # Pass 1: find an /obj/ URL across all fields
+        for field in _fields:
+            info = video_info.get(field, {})
+            for u in (info.get("url_list") or []):
+                if '/obj/' in u:
+                    cover_url = u
+                    break
+            if cover_url:
+                break
+        # Pass 2: fallback to first URL from best field
+        if not cover_url:
+            for field in _fields:
+                info = video_info.get(field, {})
+                urls = info.get("url_list") or []
+                if urls:
+                    cover_url = urls[0]
+                    break
+    if not cover_url:
+        # note pages: use first image as cover
+        images = item.get("images", [])
+        if images:
+            first_img_urls = images[0].get("url_list", [])
+            if first_img_urls:
+                cover_url = first_img_urls[0]
+
     work = {
         "aweme_id": aweme_id,
         "type": content_type,
         "desc": desc,
         "share_url": share_url,
+        "cover": cover_url,
     }
 
     if item.get("is_top"):

@@ -132,6 +132,31 @@ def extract_videos_from_dom(page):
     return unique_videos
 
 
+def _pick_hd_cover_url(cover_info):
+    """Pick the highest-quality cover URL from a cover info dict.
+
+    Strategy:
+      1. Prefer a URL whose path contains '/obj/' – these have no CDN
+         processing template and serve the original uploaded image.
+         (Original images are typically ~100 KB vs ~14 KB for templates.)
+      2. Fall back to the first URL in the list.
+
+    Note: manually rewriting ``~tplv-*`` to ``~noop.jpeg`` does NOT work
+    because the ``x-signature`` is computed over the full URL path including
+    the template suffix; changing it causes a 403.
+    """
+    url_list = cover_info.get("url_list", [])
+    if not url_list:
+        return ""
+
+    # Prefer a clean /obj/ URL (no template processing → original quality)
+    for u in url_list:
+        if '/obj/' in u:
+            return u
+
+    return url_list[0]
+
+
 def extract_metadata(detail):
     """
     Extract metadata (title, author, author_id, cover) from aweme_detail.
@@ -154,13 +179,34 @@ def extract_metadata(detail):
         metadata["author"] = author_info.get("nickname", "")
         metadata["author_id"] = author_info.get("sec_uid", "")
 
-    # Cover image: try video cover first, then general cover
+    # Cover image: prefer the author-uploaded cover over the auto-generated first frame.
+    # - Detail API: "cover_original_scale" / "dynamic_cover" hold the user-uploaded cover;
+    #   "cover" is a cropped private image; "origin_cover" is the first frame.
+    # - Post list API: "cover" itself is the user-uploaded cover.
+    #
+    # Strategy: first pass looks for an /obj/ URL (original quality, ~100 KB)
+    # across all candidate fields; second pass falls back to the best template
+    # URL from the first available field.
     video_info = detail.get("video", {})
     if video_info:
-        cover_info = video_info.get("cover", {}) or video_info.get("origin_cover", {})
-        cover_urls = cover_info.get("url_list", [])
-        if cover_urls:
-            metadata["cover"] = cover_urls[0]
+        _cover_fields = ("cover_original_scale", "dynamic_cover", "cover", "origin_cover")
+        # Pass 1: find any field that has a clean /obj/ URL
+        for field in _cover_fields:
+            info = video_info.get(field, {})
+            for u in (info.get("url_list") or []):
+                if '/obj/' in u:
+                    metadata["cover"] = u
+                    break
+            if metadata["cover"]:
+                break
+        # Pass 2: no /obj/ found – take the first URL from the best field
+        if not metadata["cover"]:
+            for field in _cover_fields:
+                info = video_info.get(field, {})
+                urls = info.get("url_list") or []
+                if urls:
+                    metadata["cover"] = urls[0]
+                    break
 
     if not metadata["cover"]:
         # Fallback: use first image as cover for note pages
@@ -276,11 +322,7 @@ def extract_video_from_api(page, found_data):
                         # Extract metadata
                         found_data["metadata"] = extract_metadata(detail)
 
-                        # Extract video cover URL
                         video_info = detail.get("video", {})
-                        cover_info = video_info.get("cover", {})
-                        cover_urls = cover_info.get("url_list", [])
-                        cover_url = cover_urls[0] if cover_urls else ""
 
                         # Find best quality
 
@@ -323,7 +365,7 @@ def extract_video_from_api(page, found_data):
                             print(f"[Video] Selected: {best_width}x{best_height} mp4 ({best_bitrate//1000}kbps) from {len(bit_rate_list)} options")
                             found_data["url"] = best_url
                             found_data["type"] = "video"
-                            found_data["cover_url"] = cover_url
+
                         else:
                             # Fallback to default play_addr
                             play_addr = video_info.get("play_addr", {})
@@ -331,7 +373,7 @@ def extract_video_from_api(page, found_data):
                             if url_list:
                                 found_data["url"] = url_list[0]
                                 found_data["type"] = "video"
-                                found_data["cover_url"] = cover_url
+
 
             except Exception as e:
                 print(f"  Error parsing API: {e}")
@@ -579,10 +621,7 @@ def _parse_video_detail(detail):
     metadata = extract_metadata(detail)
     video_info = detail["video"]
 
-    # Cover URL
-    cover_info = video_info.get("cover", {})
-    cover_urls = cover_info.get("url_list", [])
-    cover_url = cover_urls[0] if cover_urls else ""
+
 
     # Find best quality mp4
     bit_rate_list = video_info.get("bit_rate", [])
@@ -635,7 +674,6 @@ def _parse_video_detail(detail):
             {
                 "type": "video",
                 "video_url": best_url,
-                "cover_url": cover_url,
             }
         ],
     }
@@ -683,6 +721,13 @@ def get_douyin_media(url):
     try:
         if content_type == 'video':
             result = _extract_video_fast(nav_url, content_id)
+            if not result and content_id:
+                # The share/short-URL redirect always says "video" even for
+                # note/image content.  If video extraction returned nothing,
+                # retry as a note.
+                print("  Video extraction empty — retrying as note...")
+                nav_url = f"https://www.douyin.com/note/{content_id}"
+                result = _extract_note(nav_url, content_id)
         elif content_type == 'note':
             result = _extract_note(nav_url, content_id)
         else:
@@ -723,6 +768,12 @@ def _extract_video_fast(nav_url, content_id):
         if result:
             print("Successfully extracted video URL via fast API call.")
             return result
+        # API returned data but it's not a video (e.g. note/image post
+        # whose share-URL redirect said "video").  Skip the expensive
+        # full-navigation fallback — the caller will retry as note.
+        if detail.get("images") or "bit_rate" not in detail.get("video", {}):
+            print("  Detail API indicates non-video content, skipping video fallback.")
+            return None
 
     # Fallback: full navigation with response interception
     print("  Fast API returned empty, falling back to full navigation...")
@@ -880,7 +931,7 @@ def _extract_unknown(nav_url):
     context, page = BrowserPool.new_context_page()
     try:
         print(f"Navigating to {nav_url}...")
-        found_data = {"url": None, "type": None, "cover_url": None, "metadata": None}
+        found_data = {"url": None, "type": None, "metadata": None}
         page.on("response", extract_video_from_api(page, found_data))
         page.goto(nav_url, wait_until="domcontentloaded", timeout=30000)
         final_url = page.url
@@ -904,7 +955,6 @@ def _extract_unknown(nav_url):
                         {
                             "type": "video",
                             "video_url": found_data["url"],
-                            "cover_url": found_data.get("cover_url", ""),
                         }
                     ],
                 }
