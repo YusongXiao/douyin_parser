@@ -17,7 +17,9 @@ import time
 import re
 import os
 import argparse
+from contextlib import redirect_stdout
 from datetime import datetime
+from urllib.parse import urlparse
 
 from douyin_phaser import BrowserPool, HAS_STEALTH, _stealth
 
@@ -44,6 +46,8 @@ def parse_cookie_string(cookie_str):
         if not part or "=" not in part:
             continue
         name, _, value = part.partition("=")
+        if not name.strip():
+            continue
         cookies.append({
             "name": name.strip(),
             "value": value.strip(),
@@ -77,16 +81,29 @@ def load_cookies(cookie_arg):
         if not content:
             return []
         # Try JSON first (exported by --login)
-        if content.startswith("["):
+        if content.startswith("[") or cookie_arg.lower().endswith(".json"):
             try:
                 cookies = json.loads(content)
-                # Ensure required fields
+                if not isinstance(cookies, list):
+                    raise ValueError("Cookie JSON must contain a list")
+                normalized = []
                 for c in cookies:
+                    if (not isinstance(c, dict)
+                            or not isinstance(c.get("name"), str)
+                            or not isinstance(c.get("value"), str)):
+                        raise ValueError("Each cookie must have a name and string value")
+                    # Some browser exports contain a nameless cookie; it cannot
+                    # be used as an authentication cookie and can be ignored.
+                    if not c["name"]:
+                        continue
+                    normalized.append(c)
+                    if c.get("url"):
+                        continue
                     c.setdefault("path", "/")
                     c.setdefault("domain", ".douyin.com")
-                return cookies
-            except json.JSONDecodeError:
-                pass
+                return normalized
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid cookie JSON") from exc
         # Otherwise first non-empty, non-comment line as cookie string
         for line in content.splitlines():
             line = line.strip()
@@ -95,7 +112,12 @@ def load_cookies(cookie_arg):
         return []
 
     # Otherwise treat as raw cookie string
-    return parse_cookie_string(cookie_arg)
+    if "=" not in cookie_arg:
+        raise FileNotFoundError("Cookie file does not exist")
+    cookies = parse_cookie_string(cookie_arg)
+    if not cookies:
+        raise ValueError("Invalid cookie header")
+    return cookies
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +143,11 @@ def interactive_login(save_path="douyin_cookies.json"):
     print("  After you see your profile / homepage, press Enter here.")
     print("=" * 60 + "\n")
 
-    pw = sync_playwright().start()
+    with sync_playwright() as pw:
+        return _login_with_browser(pw, save_path)
+
+
+def _login_with_browser(pw, save_path):
     browser = pw.chromium.launch(
         headless=False,
         args=[
@@ -130,6 +156,13 @@ def interactive_login(save_path="douyin_cookies.json"):
             "--disable-infobars",
         ],
     )
+    try:
+        return _capture_login_cookies(browser, save_path)
+    finally:
+        browser.close()
+
+
+def _capture_login_cookies(browser, save_path):
     context = browser.new_context(
         user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -149,8 +182,6 @@ def interactive_login(save_path="douyin_cookies.json"):
     # Grab ALL cookies (including HttpOnly)
     cookies = context.cookies()
     context.close()
-    browser.close()
-    pw.stop()
 
     if not cookies:
         print("  No cookies captured – login may have failed.")
@@ -186,7 +217,7 @@ def extract_sec_user_id(url):
         https://www.douyin.com/user/SEC_USER_ID
         https://www.douyin.com/user/SEC_USER_ID?from_tab_name=main&vid=...
     """
-    match = re.search(r'/user/([^/?&#]+)', url)
+    match = re.fullmatch(r'/user/([A-Za-z0-9_-]+)/?', urlparse(url).path)
     return match.group(1) if match else None
 
 
@@ -271,7 +302,7 @@ def _parse_aweme_item(item):
         _fields = ("cover", "raw_cover", "dynamic_cover", "origin_cover")
         # Pass 1: find an /obj/ URL across all fields
         for field in _fields:
-            info = video_info.get(field, {})
+            info = video_info.get(field) or {}
             for u in (info.get("url_list") or []):
                 if '/obj/' in u:
                     cover_url = u
@@ -281,7 +312,7 @@ def _parse_aweme_item(item):
         # Pass 2: fallback to first URL from best field
         if not cover_url:
             for field in _fields:
-                info = video_info.get(field, {})
+                info = video_info.get(field) or {}
                 urls = info.get("url_list") or []
                 if urls:
                     cover_url = urls[0]
@@ -362,6 +393,8 @@ def _try_api_approach(page, sec_user_id, max_works=None):
     user_info = {}
     max_cursor = 0
     page_num = 0
+    seen_ids = set()
+    seen_cursors = {max_cursor}
 
     while True:
         page_num += 1
@@ -391,9 +424,13 @@ def _try_api_approach(page, sec_user_id, max_works=None):
             break
 
         has_more = data.get("has_more", 0)
-        max_cursor = data.get("max_cursor", 0)
+        new_cursor = data.get("max_cursor", 0)
 
         for item in aweme_list:
+            aweme_id = item.get("aweme_id")
+            if not aweme_id or aweme_id in seen_ids:
+                continue
+            seen_ids.add(aweme_id)
             all_works.append(_parse_aweme_item(item))
             if not user_info:
                 user_info = _extract_user_info_from_item(item)
@@ -406,6 +443,11 @@ def _try_api_approach(page, sec_user_id, max_works=None):
 
         if not has_more:
             break
+        if not new_cursor or new_cursor in seen_cursors:
+            print("  Pagination stopped: cursor did not advance.")
+            break
+        seen_cursors.add(new_cursor)
+        max_cursor = new_cursor
 
         time.sleep(0.5)
 
@@ -516,21 +558,22 @@ def _try_xhr_pagination(sec_user_id, user_page_url, max_works=None, expected_cou
         user_info = {}
 
         print(f"  [XHR] Navigating to {user_page_url}...")
-        page.goto(user_page_url, wait_until="domcontentloaded", timeout=30000)
-
         # Wait for the signing JS (securitySDK / secsdk) to initialise.
-        # We know the page is ready when the first SSR API call has fired.
+        # Register before navigation to also catch an early initial response.
+        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         try:
-            page.wait_for_response(
+            with page.expect_response(
                 lambda r: "aweme/v1/web/aweme/post" in r.url and r.status == 200,
                 timeout=10000,
-            )
-        except Exception:
+            ):
+                page.goto(user_page_url, wait_until="domcontentloaded", timeout=30000)
+        except PlaywrightTimeoutError:
             pass  # timeout is fine — signing JS may already be ready
         page.wait_for_timeout(1000)  # small extra buffer
 
         # ── Paginate using our own XHR calls (cursor=0 → end) ────────
         max_cursor = 0
+        seen_cursors = {max_cursor}
         has_more = True
         page_num = 0
         empty_pages = 0
@@ -579,8 +622,8 @@ def _try_xhr_pagination(sec_user_id, user_page_url, max_works=None, expected_cou
                 }
             """, api_url)
 
-            if not result or result.get("_error"):
-                print(f"    XHR error: {result}")
+            if not result or result.get("_error") or result.get("status_code") not in (0, None):
+                print("    XHR returned an error; retrying...")
                 empty_pages += 1
                 time.sleep(1)
                 continue
@@ -609,7 +652,14 @@ def _try_xhr_pagination(sec_user_id, user_page_url, max_works=None, expected_cou
                 empty_pages = 0
 
             if new_cursor:
+                if new_cursor in seen_cursors:
+                    print("  Pagination stopped: cursor did not advance.")
+                    break
+                seen_cursors.add(new_cursor)
                 max_cursor = new_cursor
+            elif has_more:
+                print("  Pagination stopped: next cursor is missing.")
+                break
 
             time.sleep(0.5 + (0.3 * (page_num % 3)))  # slight jitter
 
@@ -645,6 +695,8 @@ def get_all_user_works(url, max_works=None, cookies=None):
         dict  { user: {...}, works_count: int, works: [...] }
         or None on failure.
     """
+    if max_works is not None and max_works <= 0:
+        raise ValueError("max_works must be greater than zero")
     sec_user_id = extract_sec_user_id(url)
     if not sec_user_id:
         print("Error: Cannot extract sec_user_id from URL")
@@ -657,12 +709,19 @@ def get_all_user_works(url, max_works=None, cookies=None):
 
     start_ts = time.time()
     result = None
+    auth_context = None
 
     try:
         # ── Step 1: warm up browser (cookies / session) ──────────────
         print("\nWarming up browser session...")
-        BrowserPool.ensure_warmed(user_page_url)
-        warm_page = BrowserPool.get_warm_page()
+        if cookies:
+            # Isolate each supplied login and use it for profile and fallback too.
+            auth_context, warm_page = _create_user_page_context(cookies=cookies)
+            warm_page.goto(user_page_url, wait_until="domcontentloaded", timeout=30000)
+            warm_page.wait_for_timeout(2000)
+        else:
+            BrowserPool.ensure_warmed(user_page_url)
+            warm_page = BrowserPool.get_warm_page()
 
         # ── Step 2: try user profile API for richer info ─────────────
         profile_data = _fetch_user_profile(warm_page, sec_user_id)
@@ -708,6 +767,8 @@ def get_all_user_works(url, max_works=None, cookies=None):
         return None
 
     finally:
+        if auth_context:
+            auth_context.close()
         elapsed = time.time() - start_ts
         print(f"[Perf] Total time: {elapsed:.2f}s")
 
@@ -754,6 +815,26 @@ Examples:
     )
 
     args = parser.parse_args()
+    if args.max_works is not None and args.max_works <= 0:
+        parser.error("--max must be greater than zero")
+
+    if args.json_output:
+        # Keep stdout machine-readable, including load/login/shutdown messages.
+        with redirect_stdout(sys.stderr):
+            result = _run_cli(args, parser)
+        if not result:
+            sys.exit(1)
+        print(json.dumps({"code": 0, "message": "success", "data": result}, ensure_ascii=False, indent=2))
+        return
+
+    result = _run_cli(args, parser)
+    if not result:
+        print("\nNo works found.")
+        sys.exit(1)
+    _print_result(result)
+
+
+def _run_cli(args, parser):
 
     # ── Interactive login mode ──────────────────────────────────
     if args.do_login:
@@ -765,7 +846,10 @@ Examples:
     if not args.url:
         parser.error("url is required (unless using --login)")
     # Load cookies
-    cookies = load_cookies(args.cookie)
+    try:
+        cookies = load_cookies(args.cookie)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     if cookies:
         print(f"Loaded {len(cookies)} cookies")
         # Check for critical auth cookies
@@ -784,15 +868,10 @@ Examples:
     finally:
         BrowserPool.shutdown()
 
-    if not result:
-        print("\nNo works found.")
-        sys.exit(1)
+    return result
 
-    # ── Output ────────────────────────────────────────────────────────
-    if args.json_output:
-        output = {"code": 0, "message": "success", "data": result}
-        print(json.dumps(output, ensure_ascii=False, indent=2))
-        sys.exit(0)
+
+def _print_result(result):
 
     # Human-readable summary
     user = result.get("user", {})

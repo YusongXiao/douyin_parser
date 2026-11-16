@@ -13,18 +13,25 @@ API:
 """
 
 import asyncio
+import logging
+import os
+from functools import partial
+from urllib.parse import urlparse
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from douyin_phaser import BrowserPool
-from douyin_user_phaser import get_all_user_works, load_cookies
+from api_common import is_douyin_url, lifespan
+from douyin_user_phaser import extract_sec_user_id, get_all_user_works, load_cookies
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Douyin User Works Extractor API",
     description="Extract all work share-links (video / note) from a Douyin user profile",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -36,27 +43,25 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Persistent cookie cache — loaded once, reused across requests
+# Cookie loading happens on the browser worker so file I/O does not block HTTP.
 # ---------------------------------------------------------------------------
-_cookie_cache: dict[str, list[dict]] = {}
-
-
 def _get_cookies(cookie_arg: str | None) -> list[dict]:
-    """Load and cache cookies from a cookie argument."""
-    if not cookie_arg:
-        return []
-    if cookie_arg not in _cookie_cache:
-        _cookie_cache[cookie_arg] = load_cookies(cookie_arg)
-    return _cookie_cache[cookie_arg]
+    """Reload cookies on each request so a new login takes effect immediately."""
+    if cookie_arg is None and os.path.isfile("douyin_cookies.json"):
+        cookie_arg = "douyin_cookies.json"
+    return load_cookies(cookie_arg)
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle
+# Worker entry point
 # ---------------------------------------------------------------------------
 
-@app.on_event("shutdown")
-def shutdown_event():
-    BrowserPool.shutdown()
+def _extract_user_works(url, max_works, cookie_arg):
+    try:
+        cookies = _get_cookies(cookie_arg)
+    except (OSError, ValueError) as exc:
+        raise ValueError("Invalid or unreadable cookie input") from exc
+    return get_all_user_works(url, max_works, cookies=cookies)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +89,7 @@ def _success_response(data: dict):
 @app.get("/")
 async def root(
     url: str = Query(None, description="Douyin user profile URL"),
-    max: int = Query(None, description="Maximum number of works to fetch"),
+    max: int = Query(None, gt=0, description="Maximum number of works to fetch"),
     cookie: str = Query(None, description="Cookie string, cookie file path, or JSON cookie file (from --login)"),
 ):
     """
@@ -93,21 +98,20 @@ async def root(
     - No ``url`` → return API info.
     """
     if url:
-        if not url.startswith("http"):
-            return _error_response(400, "Invalid URL format, must start with http/https")
+        if not is_douyin_url(url):
+            return _error_response(400, "URL must be an http/https Douyin URL")
 
-        if "/user/" not in url:
+        if not extract_sec_user_id(urlparse(url).path):
             return _error_response(400, "URL must be a Douyin user profile URL containing /user/")
 
-        # Default to douyin_cookies.json if not specified (for Docker/host usage)
-        if not cookie:
-            cookie = "douyin_cookies.json"
-
-        cookies = _get_cookies(cookie)
-
         try:
-            result = await asyncio.to_thread(get_all_user_works, url, max, cookies=cookies)
+            result = await asyncio.get_running_loop().run_in_executor(
+                app.state.browser_executor, partial(_extract_user_works, url, max, cookie)
+            )
+        except ValueError as e:
+            return _error_response(400, str(e))
         except Exception as e:
+            logger.exception("User works extraction failed")
             return _error_response(500, f"Extraction failed: {str(e)}")
 
         if not result:

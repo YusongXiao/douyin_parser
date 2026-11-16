@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # 设置环境变量
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -28,6 +28,6 @@ RUN playwright install chromium
 # 复制项目文件
 COPY . .
 
-EXPOSE 8000
+EXPOSE 8000 8001
 
 CMD ["uvicorn", "douyin_phaser_api:app", "--host", "0.0.0.0", "--port", "8000"]

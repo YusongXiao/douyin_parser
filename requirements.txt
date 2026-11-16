@@ -1,4 +1,4 @@
-playwright
-playwright-stealth
-fastapi
-uvicorn[standard]
+playwright>=1.65.2
+playwright-stealth>=2.0.3
+fastapi>=0.163.1
+uvicorn[standard]>=0.54.0

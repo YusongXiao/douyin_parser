@@ -47,7 +47,7 @@ docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser
 
    使用 Docker Compose 一键启动：
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    ```
 
    或者使用 Docker 命令直接运行 (如果你没有安装 Compose)：
@@ -65,7 +65,19 @@ docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser
 
 #### 1. 安装依赖
 
-需要 Python 3.8+ 环境。
+需要 Python 3.12+ 环境（与 `pyproject.toml`、Docker 保持一致）。
+
+使用 uv 安装并运行：
+
+```bash
+uv sync
+uv run playwright install chromium
+uv run douyin_phaser_api.py       # 媒体接口，端口 8000
+# 另开终端：
+uv run douyin_user_phaser_api.py  # 用户作品接口，端口 8001
+```
+
+也可以使用 pip：
 
 ```bash
 # 安装 Python 依赖

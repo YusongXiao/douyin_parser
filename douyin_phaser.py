@@ -29,14 +29,14 @@ def extract_images_from_dom(page):
     Returns a list of high-quality, signed image URLs that can be accessed directly.
     """
     # Collect all potential image URLs from both img tags and background-image
-    all_urls = set()
+    all_urls = []
     
     # Method 1: img tags
     imgs = page.query_selector_all('img')
     for img in imgs:
         src = img.get_attribute('src')
         if src:
-            all_urls.add(src)
+            all_urls.append(src)
     
     # Method 2: background-image styles
     divs = page.query_selector_all('[style*="background-image"]')
@@ -45,7 +45,7 @@ def extract_images_from_dom(page):
         if style and 'url(' in style:
             match = re.search(r'url\(["\']?([^"\'()]+)["\']?\)', style)
             if match:
-                all_urls.add(match.group(1))
+                all_urls.append(match.group(1))
     
     # Filter for main content images with valid signatures
     content_images = []
@@ -115,13 +115,12 @@ def extract_videos_from_dom(page):
         if match:
             video_id = match.group(1)
             if video_id not in seen_videos:
+                if 'v3-web.douyinvod' not in url and any(
+                    'v3-web.douyinvod' in v and video_id in v for v in video_sources
+                ):
+                    continue
                 seen_videos.add(video_id)
-                # Prefer v3-web domain
-                if 'v3-web.douyinvod' in url:
-                    unique_videos.append(url)
-                elif not any('v3-web.douyinvod' in v and video_id in v for v in video_sources):
-                    # No v3-web version available, use this one
-                    unique_videos.append(url)
+                unique_videos.append(url)
         else:
             # Fallback: use full URL path for deduplication
             parsed_path = urlparse(url).path
@@ -192,7 +191,7 @@ def extract_metadata(detail):
         _cover_fields = ("cover_original_scale", "dynamic_cover", "cover", "origin_cover")
         # Pass 1: find any field that has a clean /obj/ URL
         for field in _cover_fields:
-            info = video_info.get(field, {})
+            info = video_info.get(field) or {}
             for u in (info.get("url_list") or []):
                 if '/obj/' in u:
                     metadata["cover"] = u
@@ -202,7 +201,7 @@ def extract_metadata(detail):
         # Pass 2: no /obj/ found – take the first URL from the best field
         if not metadata["cover"]:
             for field in _cover_fields:
-                info = video_info.get(field, {})
+                info = video_info.get(field) or {}
                 urls = info.get("url_list") or []
                 if urls:
                     metadata["cover"] = urls[0]
@@ -221,7 +220,7 @@ def extract_metadata(detail):
 
 def _select_best_url(url_list, preferred_domain):
     """Select the best URL from a list, preferring a specific domain."""
-    for u in url_list:
+    for u in url_list or []:
         if preferred_domain in u:
             return u
     return url_list[0] if url_list else None
@@ -255,7 +254,7 @@ def extract_note_from_api(page, note_id):
             return None
 
         detail = response["aweme_detail"]
-        if not detail or "images" not in detail:
+        if not detail or not detail.get("images"):
             return None
 
         metadata = extract_metadata(detail)
@@ -271,8 +270,8 @@ def extract_note_from_api(page, note_id):
             # Check if this image has video (animated GIF as MP4)
             video_url = None
             if "video" in img:
-                vid = img["video"]
-                play_addr = vid.get("play_addr", {})
+                vid = img["video"] or {}
+                play_addr = vid.get("play_addr") or {}
                 url_list = play_addr.get("url_list", [])
                 if url_list:
                     video_url = _select_best_url(url_list, "v3-web.douyinvod")
@@ -312,69 +311,14 @@ def extract_video_from_api(page, found_data):
         if "aweme/v1/web/aweme/detail" in response.url and response.status == 200:
             try:
                 json_data = response.json()
-                if "aweme_detail" in json_data:
-                    detail = json_data["aweme_detail"]
-                    # Only process video pages (has "video" key with bit_rate), not note pages
-                    # Skip if we already have the data (handler can fire multiple times)
-                    if found_data.get("url"):
-                        return
-                    if detail and "video" in detail and "bit_rate" in detail.get("video", {}):
-                        # Extract metadata
-                        found_data["metadata"] = extract_metadata(detail)
-
-                        video_info = detail.get("video", {})
-
-                        # Find best quality
-
-
-                        bit_rate_list = video_info.get("bit_rate", [])
-
-                        best_url = None
-                        best_resolution = 0
-                        best_bitrate = 0
-                        best_width = 0
-                        best_height = 0
-
-                        for br in bit_rate_list:
-                            fmt = br.get("format", "")
-                            current_br = br.get("bit_rate", 0)
-
-                            br_play_addr = br.get("play_addr", {})
-                            br_url_list = br_play_addr.get("url_list", [])
-
-                            width = br_play_addr.get("width", 0)
-                            height = br_play_addr.get("height", 0)
-                            resolution = width * height
-
-                            # Only select mp4 format (muxed video+audio)
-                            if fmt != "mp4" or width == 0:
-                                continue
-
-                            # Priority: higher resolution, then higher bitrate
-                            if resolution > best_resolution or (
-                                resolution == best_resolution and current_br > best_bitrate
-                            ):
-                                if br_url_list:
-                                    best_resolution = resolution
-                                    best_bitrate = current_br
-                                    best_url = _select_best_url(br_url_list, "douyinvod.com")
-                                    best_width = width
-                                    best_height = height
-
-                        if best_url:
-                            print(f"[Video] Selected: {best_width}x{best_height} mp4 ({best_bitrate//1000}kbps) from {len(bit_rate_list)} options")
-                            found_data["url"] = best_url
-                            found_data["type"] = "video"
-
-                        else:
-                            # Fallback to default play_addr
-                            play_addr = video_info.get("play_addr", {})
-                            url_list = play_addr.get("url_list", [])
-                            if url_list:
-                                found_data["url"] = url_list[0]
-                                found_data["type"] = "video"
-
-
+                if found_data.get("url"):
+                    return
+                detail = json_data.get("aweme_detail")
+                result = _parse_video_detail(detail)
+                if result:
+                    found_data["metadata"] = extract_metadata(detail)
+                    found_data["url"] = result["items"][0]["video_url"]
+                    found_data["type"] = "video"
             except Exception as e:
                 print(f"  Error parsing API: {e}")
 
@@ -533,7 +477,8 @@ class BrowserPool:
 _BLOCKED_RESOURCE_TYPES = {"image", "font", "stylesheet", "media", "websocket", "manifest", "texttrack", "eventsource", "ping"}
 _BLOCKED_URL_KEYWORDS = [
     "analytics", "log-sdk", "sentry", "monitor", "beacon",
-    "performance", "frontier/collect", "secsdk", "captcha",
+    # The security SDK signs detail requests. Blocking it causes upstream 403s.
+    "performance", "frontier/collect",
     "search/list", "hot/search", "notification",
     "user/settings", "risklevel", "online_feedback",
     "solution/resource", "turn/offline", "social/count",
@@ -615,7 +560,7 @@ def _parse_video_detail(detail):
 
     Returns a result dict matching the API response schema, or None.
     """
-    if not detail or "video" not in detail or "bit_rate" not in detail.get("video", {}):
+    if not detail or detail.get("images") or not detail.get("video"):
         return None
 
     metadata = extract_metadata(detail)
@@ -624,7 +569,7 @@ def _parse_video_detail(detail):
 
 
     # Find best quality mp4
-    bit_rate_list = video_info.get("bit_rate", [])
+    bit_rate_list = video_info.get("bit_rate") or []
     best_url = None
     best_resolution = 0
     best_bitrate = 0
@@ -634,7 +579,7 @@ def _parse_video_detail(detail):
     for br in bit_rate_list:
         fmt = br.get("format", "")
         current_br = br.get("bit_rate", 0)
-        br_play_addr = br.get("play_addr", {})
+        br_play_addr = br.get("play_addr") or {}
         br_url_list = br_play_addr.get("url_list", [])
         width = br_play_addr.get("width", 0)
         height = br_play_addr.get("height", 0)
@@ -654,8 +599,8 @@ def _parse_video_detail(detail):
                 best_height = height
 
     if not best_url:
-        play_addr = video_info.get("play_addr", {})
-        url_list = play_addr.get("url_list", [])
+        play_addr = video_info.get("play_addr") or {}
+        url_list = play_addr.get("url_list") or []
         if url_list:
             best_url = url_list[0]
 

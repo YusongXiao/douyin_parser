@@ -11,17 +11,23 @@ API:
 """
 
 import asyncio
+import logging
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from douyin_phaser import get_douyin_media, BrowserPool
+from api_common import is_douyin_url, lifespan
+from douyin_phaser import get_douyin_media
+
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI(
     title="Douyin Media Extractor API",
     description="Extract video and image URLs from Douyin pages",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Enable CORS for all origins
@@ -32,12 +38,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("shutdown")
-def shutdown_event():
-    """Clean up persistent browser on server shutdown."""
-    BrowserPool.shutdown()
 
 
 def _error_response(code: int, message: str):
@@ -65,13 +65,15 @@ async def root(url: str = Query(None, description="Douyin share URL or page URL"
     """
     if url:
         # Validate URL format
-        if not url.startswith("http"):
-            return _error_response(400, "Invalid URL format, must start with http/https")
+        if not is_douyin_url(url):
+            return _error_response(400, "URL must be an http/https Douyin URL")
 
         try:
-            # Run the synchronous Playwright extraction in a thread to avoid blocking
-            result = await asyncio.to_thread(get_douyin_media, url)
+            result = await asyncio.get_running_loop().run_in_executor(
+                app.state.browser_executor, get_douyin_media, url
+            )
         except Exception as e:
+            logger.exception("Media extraction failed")
             return _error_response(500, f"Extraction failed: {str(e)}")
 
         if not result:

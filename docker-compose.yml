@@ -1,12 +1,18 @@
 services:
   douyin-phaser:
+    build: .
     image: ghcr.io/yusongxiao/douyin_phaser:main
     container_name: douyin-phaser
     ports:
       - "8000:8000"  # Media Extractor API
       - "8001:8001"  # User Phaser API
     volumes:
-      - ./douyin_cookies.json:/app/douyin_cookies.json
+      - type: bind
+        source: ./douyin_cookies.json
+        target: /app/douyin_cookies.json
+        read_only: true
+        bind:
+          create_host_path: false
     environment:
       - TZ=Asia/Shanghai
     command: sh -c "uvicorn douyin_phaser_api:app --host 0.0.0.0 --port 8000 & uvicorn douyin_user_phaser_api:app --host 0.0.0.0 --port 8001 & wait"
