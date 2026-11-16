@@ -1,7 +1,7 @@
 services:
   douyin-parser:
     build: .
-    image: douyin-parser:local
+    image: ghcr.io/yusongxiao/douyin_parser:main
     container_name: douyin-parser
     ports:
       - "8000:8000"  # Media Extractor API
