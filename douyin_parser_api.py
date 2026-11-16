@@ -3,7 +3,7 @@ Douyin Media Extractor API Server
 Provides HTTP API for extracting media URLs from Douyin pages.
 
 Usage:
-    python douyin_phaser_api.py
+    python douyin_parser_api.py
     # Server runs on http://localhost:8000
 
 API:
@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from api_common import is_douyin_url, lifespan
-from douyin_phaser import get_douyin_media
+from douyin_parser import get_douyin_media
 
 logger = logging.getLogger(__name__)
 

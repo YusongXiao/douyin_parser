@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import Mock
 
-from douyin_phaser import _parse_video_detail, extract_images_from_dom, extract_videos_from_dom, extract_video_from_api
+from douyin_parser import _parse_video_detail, extract_images_from_dom, extract_videos_from_dom, extract_video_from_api
 
 
 class MediaParserTests(unittest.TestCase):

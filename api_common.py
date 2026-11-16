@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI
 
-from douyin_phaser import BrowserPool
+from douyin_parser import BrowserPool
 
 
 @asynccontextmanager

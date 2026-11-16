@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from playwright.sync_api import Page
 
-import douyin_user_phaser as parser
+import douyin_user_parser as parser
 
 
 class CookieTests(unittest.TestCase):
@@ -115,7 +115,7 @@ class UserParserTests(unittest.TestCase):
             print("progress log")
             return expected
 
-        with patch("sys.argv", ["douyin_user_phaser.py", "https://www.douyin.com/user/user", "--json"]), patch.object(
+        with patch("sys.argv", ["douyin_user_parser.py", "https://www.douyin.com/user/user", "--json"]), patch.object(
             parser, "get_all_user_works", side_effect=extract
         ), patch.object(parser.BrowserPool, "shutdown", side_effect=lambda: print("shutdown log")), redirect_stdout(stdout), redirect_stderr(stderr):
             parser.main()

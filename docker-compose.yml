@@ -1,11 +1,11 @@
 services:
-  douyin-phaser:
+  douyin-parser:
     build: .
-    image: ghcr.io/yusongxiao/douyin_phaser:main
-    container_name: douyin-phaser
+    image: douyin-parser:local
+    container_name: douyin-parser
     ports:
       - "8000:8000"  # Media Extractor API
-      - "8001:8001"  # User Phaser API
+      - "8001:8001"  # User Parser API
     volumes:
       - type: bind
         source: ./douyin_cookies.json
@@ -15,5 +15,5 @@ services:
           create_host_path: false
     environment:
       - TZ=Asia/Shanghai
-    command: sh -c "uvicorn douyin_phaser_api:app --host 0.0.0.0 --port 8000 & uvicorn douyin_user_phaser_api:app --host 0.0.0.0 --port 8001 & wait"
+    command: sh -c "uvicorn douyin_parser_api:app --host 0.0.0.0 --port 8000 & uvicorn douyin_user_parser_api:app --host 0.0.0.0 --port 8001 & wait"
     restart: unless-stopped

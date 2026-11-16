@@ -5,9 +5,9 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import douyin_phaser_api as api
+import douyin_parser_api as api
 from api_common import BrowserPool, is_douyin_url
-from douyin_phaser import _block_unnecessary
+from douyin_parser import _block_unnecessary
 
 
 class ResourcePolicyTests(unittest.TestCase):

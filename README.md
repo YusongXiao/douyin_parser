@@ -1,6 +1,6 @@
 # Douyin Media Extractor (抖音媒体提取器)
 
-`douyin_phaser.py` 是一个基于 Playwright 浏览器自动化的抖音媒体直链提取工具。支持提取： **视频 (4K)**、**图集** 和 **动图** 的直链提取。提供命令行工具 (CLI) 和 HTTP API 两种使用方式。
+`douyin_parser.py` 是一个基于 Playwright 浏览器自动化的抖音媒体直链提取工具。支持提取： **视频 (4K)**、**图集** 和 **动图** 的直链提取。提供命令行工具 (CLI) 和 HTTP API 两种使用方式。
 
 ## ✨ 功能特点
 
@@ -26,9 +26,11 @@
 如果你只需要提取**单个视频/图文**的直链，无需任何配置，直接运行即可（不需要 Cookie）：
 
 ```bash
-docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser:main
+docker run -d -p 8000:8000 --name douyin-parser ghcr.io/yusongxiao/douyin_phaser:main
 ```
 服务启动后，访问 `http://localhost:8000` 即可使用。
+
+已发布的上游 GHCR 镜像仍使用 `douyin_phaser` 名称；项目脚本和本地服务统一使用 `parser`。
 
 ### 方式二：Docker Compose 部署 (推荐 - 完整功能)
 
@@ -39,7 +41,7 @@ docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser
    由于容器内无法扫码登录，你需要先在宿主机生成 Cookie 文件：
    ```bash
    # 在项目目录下运行，会弹出浏览器让你扫码
-   python douyin_user_phaser.py --login
+   python douyin_user_parser.py --login
    # 成功后会生成 douyin_cookies.json 文件
    ```
 
@@ -52,13 +54,14 @@ docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser
 
    或者使用 Docker 命令直接运行 (如果你没有安装 Compose)：
    ```bash
+   docker build -t douyin-parser:local .
    docker run -d \
      -p 8000:8000 \
      -p 8001:8001 \
      -v ${PWD}/douyin_cookies.json:/app/douyin_cookies.json \
-     --name douyin-phaser \
-     ghcr.io/yusongxiao/douyin_phaser:main \
-     sh -c "uvicorn douyin_phaser_api:app --host 0.0.0.0 --port 8000 & uvicorn douyin_user_phaser_api:app --host 0.0.0.0 --port 8001 & wait"
+     --name douyin-parser \
+     douyin-parser:local \
+     sh -c "uvicorn douyin_parser_api:app --host 0.0.0.0 --port 8000 & uvicorn douyin_user_parser_api:app --host 0.0.0.0 --port 8001 & wait"
    ```
 
 ### 方式三：源码部署
@@ -72,9 +75,9 @@ docker run -d -p 8000:8000 --name douyin-phaser ghcr.io/yusongxiao/douyin_phaser
 ```bash
 uv sync
 uv run playwright install chromium
-uv run douyin_phaser_api.py       # 媒体接口，端口 8000
+uv run douyin_parser_api.py       # 媒体接口，端口 8000
 # 另开终端：
-uv run douyin_user_phaser_api.py  # 用户作品接口，端口 8001
+uv run douyin_user_parser_api.py  # 用户作品接口，端口 8001
 ```
 
 也可以使用 pip：
@@ -92,7 +95,7 @@ playwright install chromium
 启动 API 服务器，供其他程序调用：
 
 ```bash
-python douyin_phaser_api.py
+python douyin_parser_api.py
 ```
 服务器默认运行在 `http://localhost:8000`。
 
@@ -114,7 +117,7 @@ curl "http://localhost:8001/?url=https://www.douyin.com/user/..."
 也可以直接运行脚本提取单个链接：
 
 ```bash
-python douyin_phaser.py "https://v.douyin.com/abc1234/"
+python douyin_parser.py "https://v.douyin.com/abc1234/"
 ```
 
 ## 🛠️ API 返回结构

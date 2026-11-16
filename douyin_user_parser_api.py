@@ -3,7 +3,7 @@ Douyin User Works Extractor API Server
 Provides HTTP API for extracting all work share-links from a Douyin user profile.
 
 Usage:
-    python douyin_user_phaser_api.py
+    python douyin_user_parser_api.py
     # Server runs on http://localhost:8001
 
 API:
@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 
 from api_common import is_douyin_url, lifespan
-from douyin_user_phaser import extract_sec_user_id, get_all_user_works, load_cookies
+from douyin_user_parser import extract_sec_user_id, get_all_user_works, load_cookies
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ async def root(
             "cookie": "Cookie string or path to cookie file (optional, defaults to douyin_cookies.json)",
         },
         "docs": "/docs",
-        "tip": "Run `python douyin_user_phaser.py --login` first to export cookies with HttpOnly auth tokens.",
+        "tip": "Run `python douyin_user_parser.py --login` first to export cookies with HttpOnly auth tokens.",
     }
 
 

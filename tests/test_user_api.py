@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import douyin_user_phaser_api as api
+import douyin_user_parser_api as api
 from api_common import BrowserPool
 
 

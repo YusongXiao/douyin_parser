@@ -3,12 +3,12 @@ Douyin User Works Extractor
 Extracts all work share-links (video / note) from a Douyin user profile page.
 
 Usage:
-    python douyin_user_phaser.py <user_url>
-    python douyin_user_phaser.py <user_url> --max 50
-    python douyin_user_phaser.py <user_url> --json
+    python douyin_user_parser.py <user_url>
+    python douyin_user_parser.py <user_url> --max 50
+    python douyin_user_parser.py <user_url> --json
 
 Examples:
-    python douyin_user_phaser.py "https://www.douyin.com/user/MS4wLjABAAAA..."
+    python douyin_user_parser.py "https://www.douyin.com/user/MS4wLjABAAAA..."
 """
 
 import sys
@@ -21,7 +21,7 @@ from contextlib import redirect_stdout
 from datetime import datetime
 from urllib.parse import urlparse
 
-from douyin_phaser import BrowserPool, HAS_STEALTH, _stealth
+from douyin_parser import BrowserPool, HAS_STEALTH, _stealth
 
 
 # ---------------------------------------------------------------------------
@@ -784,12 +784,12 @@ def main():
         epilog="""
 Examples:
   # Step 1: login once to get full cookies (including HttpOnly)
-  python douyin_user_phaser.py --login
+  python douyin_user_parser.py --login
 
   # Step 2: use saved cookies for full pagination
-  python douyin_user_phaser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json
-  python douyin_user_phaser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json --max 50
-  python douyin_user_phaser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json --json
+  python douyin_user_parser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json
+  python douyin_user_parser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json --max 50
+  python douyin_user_parser.py "https://www.douyin.com/user/MS4wLjABAAAA..." --cookie douyin_cookies.json --json
         """,
     )
     parser.add_argument("url", nargs="?", default=None, help="Douyin user profile URL")
