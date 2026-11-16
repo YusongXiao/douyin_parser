@@ -1,0 +1,10 @@
+[project]
+name = "douyin-parser"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.163.1",
+    "playwright>=1.65.2",
+    "playwright-stealth>=2.0.3",
+    "uvicorn[standard]>=0.54.0",
+]
