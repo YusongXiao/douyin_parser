@@ -1,3 +1,5 @@
+
+
 # Douyin Media Extractor (抖音媒体提取器)
 
 `douyin_phaser.py` 是一个基于 Playwright 浏览器自动化的抖音媒体直链提取工具。支持提取： **视频 (4K)**、**图集** 和 **动图** 的直链提取。提供命令行工具 (CLI) 和 HTTP API 两种使用方式。
@@ -92,9 +94,13 @@ playwright install chromium
 启动 API 服务器，供其他程序调用：
 
 ```bash
+# 媒体提取 API (端口 8000)
 python douyin_phaser_api.py
+
+# 用户主页提取 API (端口 8001)
+python douyin_user_phaser_api.py
 ```
-服务器默认运行在 `http://localhost:8000`。
+服务器默认运行在 `http://localhost:8000` (媒体提取) 和 `http://localhost:8001` (用户提取)。
 
 **API 使用示例**:
 
@@ -197,4 +203,3 @@ API 返回统一的 JSON 结构，方便调用方处理。
 ## 📚 更多文档
 
 - [技术原理与架构详解](./原理.md)
-
